@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: pgvector_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d
+
+  mindsdb:
+    image: mindsdb/mindsdb:latest
+    container_name: mindsdb
+    restart: unless-stopped
+    environment:
+      MINDSDB_APIS: "http,mysql"     # expose HTTP GUI + MySQL SQL API
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Uncomment to require login to MindsDB (recommended beyond local)
+      # MINDSDB_USERNAME: mindsdb
+      # MINDSDB_PASSWORD: change_me
+    ports:
+      - "47334:47334"                # HTTP GUI/API
+      - "47335:47335"                # MySQL-compatible SQL API
+    volumes:
+      - mindsdb_storage:/root/mdb_storage
+volumes:
+  pg_data:
+  mindsdb_storage:
