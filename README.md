@@ -100,6 +100,13 @@ docker compose up -d
 docker compose ps  # Verify all 4 services running
 ```
 
+**Development Mode:** Code changes auto-reload! The `agent_app` service has volume mounts enabled, so you can edit Python files and see changes immediately without rebuilding.
+
+**Note:** Environment variable changes (`.env` file) require restarting the container:
+```bash
+docker compose up -d agent-app  # Pick up new env vars
+```
+
 **Services:**
 - `postgres` (5432) - PGVector storage
 - `mindsdb` (47334, 47335) - KB + SQL interface
@@ -227,7 +234,7 @@ NIM_API_KEY=nvapi-...              # For Nemotron LLM
 
 # === NVIDIA NIM Models ===
 NIM_API_BASE=https://integrate.api.nvidia.com/v1
-NIM_LLM_MODEL=nvidia/llama-3.1-nemotron-70b-instruct
+NIM_LLM_MODEL=nvidia/llama-3.1-nemotron-ultra-253b-v1
 NIM_RERANK_MODEL=nvidia/llama-3.2-nv-rerankqa-1b-v2
 NIM_VLM_PARSER_MODEL=nvidia/nemoretriever-parse
 
@@ -302,10 +309,15 @@ if assessment.sufficient:
 research = gpt_researcher.conduct(query, depth="quick")
 # → Returns comprehensive report with citations
 
-# Auto-save to KB for future queries
+# Synthesize research into focused answer using Nemotron
+synthesized_answer = generate_answer_from_research(query, research.report)
+# → LLM creates concise, query-focused response (300-500 words)
+
+# Auto-save FULL research report to KB for future queries
 insert_to_kb(research.report, source="mcp:gpt-researcher")
 
-return research.report
+# Return synthesized answer (full report available in sources)
+return synthesized_answer
 ```
 
 ---
@@ -558,7 +570,7 @@ Queries still work without reranking, just with slightly lower precision.
 | Error | Cause | Solution |
 |-------|-------|----------|
 | 500 - Internal Server Error | Service connection issue | Check docker logs, verify .env |
-| 404 - Model not found | Wrong NIM model name | Fix NIM_LLM_MODEL in .env |
+| 404 - Model not found | Wrong NIM model name | Fix NIM_LLM_MODEL in .env (should be `nvidia/llama-3.1-nemotron-ultra-253b-v1`) |
 | 1221 - Invalid database | Missing `mindsdb.` prefix | Update queries to use `mindsdb.KB_NAME` |
 | Connection refused | Docker network issue | Use service names, not localhost |
 
@@ -572,7 +584,8 @@ This project demonstrates:
 - Core LLM for routing decisions
 - Quality assessment of KB results
 - Answer generation with citations
-- Using `nvidia/llama-3.1-nemotron-70b-instruct`
+- Research synthesis into focused responses
+- Using `nvidia/llama-3.1-nemotron-ultra-253b-v1`
 
 ### ✅ NVIDIA NIM Integration
 - Nemotron for intelligence
