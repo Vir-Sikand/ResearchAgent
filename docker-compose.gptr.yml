@@ -1,0 +1,18 @@
+services:
+  gpt_researcher_mcp:
+    image: python:3.11-slim
+    container_name: gpt_researcher_mcp
+    working_dir: /app
+    env_file: .env
+    environment:
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./mcp_server.py:/app/mcp_server.py
+    command: >
+      sh -c "
+      apt-get update && apt-get install -y git &&
+      pip install --no-cache-dir 'mcp[cli]' tavily-python openai git+https://github.com/assafelovic/gpt-researcher.git &&
+      python /app/mcp_server.py
+      "

@@ -114,5 +114,74 @@ SELECT * FROM org_kb_pg WHERE content = 'compression of research notes';
 ## Files
 
 - `.env` - Environment variables for Postgres
-- `docker_compose.yaml` - Docker services configuration
+- `.env.example` - Template for API keys and configuration
+- `docker-compose.yml` - Docker services configuration
+- `docker-compose.gptr.yml` - GPT-Researcher MCP service
 - `init/01_pgvector.sql` - pgvector extension initialization
+- `clients/` - MCP client scripts for research and KB upsert
+- `mcp/gptr-mcp/Dockerfile` - Alternative Dockerfile for GPT-Researcher
+
+---
+
+# GPT-Researcher MCP Setup
+
+This section adds GPT-Researcher MCP server capabilities to your existing setup.
+
+## Quick Start
+
+### 1. Set up API keys
+
+```bash
+cp .env.example .env
+# Edit .env and add your real API keys:
+# - OPENAI_API_KEY=sk-your-key-here
+# - TAVILY_API_KEY=tvly-your-key-here
+```
+
+### 2. Start GPT-Researcher MCP
+
+```bash
+docker compose -f docker-compose.gptr.yml --env-file .env up -d
+docker logs -f gpt_researcher_mcp   # watch for "listening on :8000"
+```
+
+### 3. Install client dependencies
+
+```bash
+cd clients
+pip install -r requirements.txt
+```
+
+### 4. Test the MCP connection
+
+```bash
+python research_mcp_client.py --url http://127.0.0.1:8000/sse \
+  --query "Key trends in retrieval-augmented generation for enterprise KBs" \
+  --depth quick --k 12
+```
+
+### 5. Research and upsert to KB
+
+```bash
+python run_research_and_upsert.py --url http://127.0.0.1:8000/sse \
+  --kb org_kb_openai \
+  --query "How should we route between KB and web research for hardware PRDs?" \
+  --depth deep --k 16
+```
+
+### 6. Verify research is searchable
+
+```sql
+SELECT * FROM org_kb_openai WHERE content = 'KB vs web research routing for hardware PRDs';
+```
+
+## Services Overview
+
+- **MindsDB + pgvector**: Ports 47334 (GUI), 47335 (MySQL API), 5432 (Postgres)
+- **GPT-Researcher MCP**: Port 8000 (SSE endpoint)
+
+## Troubleshooting
+
+- **MCP server not starting?** Check `docker logs gpt_researcher_mcp` for entrypoint errors
+- **Tool not found?** The client looks for tools named: `deep_research`, `research.run`, `research`, `run_research`
+- **KB upsert failing?** Verify your KB exists and MindsDB connection settings in `.env`
