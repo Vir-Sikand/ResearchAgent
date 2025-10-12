@@ -31,29 +31,68 @@ services:
     depends_on:
       - postgres
 
+  gpt_researcher_mcp:
+    image: python:3.11-slim
+    container_name: gpt_researcher_mcp
+    working_dir: /app
+    restart: unless-stopped
+    environment:
+      PORT: 8000
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      SMART_LLM: "openai:gpt-4o"
+      STRATEGIC_LLM: "openai:o1"
+      FAST_LLM: "openai:gpt-4o-mini"
+      SMART_TOKEN_LIMIT: "16000"
+      STRATEGIC_TOKEN_LIMIT: "8000"
+      SUMMARY_TOKEN_LIMIT: "2000"
+      MAX_SEARCH_RESULTS_PER_QUERY: "10"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./mcp_server.py:/app/mcp_server.py
+    command: >
+      sh -c "
+      apt-get update && apt-get install -y git &&
+      pip install --no-cache-dir fastapi uvicorn tavily-python openai git+https://github.com/assafelovic/gpt-researcher.git &&
+      python /app/mcp_server.py
+      "
+
   agent-app:
     build: ./agent_app
     container_name: agent_app
     restart: unless-stopped
     env_file: .env
     environment:
-      # Reuse the same token the KB uses, but under the name the app expects:
-      NIM_API_KEY: ${OPENAI_API_KEY}
-      # NIM defaults (override in .env if you like):
+      # OpenAI (for embeddings)
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # NVIDIA NIM (for LLM, VLM, Reranker)
+      NIM_API_KEY: ${NIM_API_KEY}
       NIM_API_BASE: ${NIM_API_BASE}
       NIM_LLM_MODEL: ${NIM_LLM_MODEL}
       NIM_RERANK_MODEL: ${NIM_RERANK_MODEL}
       NIM_VLM_PARSER_MODEL: ${NIM_VLM_PARSER_MODEL}
-      # MindsDB connection (service name on the Docker network):
-      MINDSDB_HOST: ${MINDSDB_HOST}
-      MINDSDB_PORT: ${MINDSDB_PORT}
-      MINDSDB_USER: ${MINDSDB_USER}
-      MINDSDB_PASSWORD: ${MINDSDB_PASSWORD}
-      KB_NAME: ${KB_NAME}
+      # MindsDB connection (use service name inside Docker network):
+      MINDSDB_HOST: mindsdb
+      MINDSDB_PORT: 47335
+      MINDSDB_USER: ${MINDSDB_USER:-mindsdb}
+      MINDSDB_PASSWORD: ${MINDSDB_PASSWORD:-}
+      KB_NAME: ${KB_NAME:-org_kb_openai}
+      # GPT-Researcher MCP connection
+      GPT_RESEARCHER_URL: ${GPT_RESEARCHER_URL:-http://gpt_researcher_mcp:8000}
+      # Agent config
+      CONFIDENCE_THRESHOLD: ${CONFIDENCE_THRESHOLD:-0.7}
+      MIN_KB_RESULTS: ${MIN_KB_RESULTS:-3}
     ports:
       - "8080:8080"
+    volumes:
+      # Mount app code for live development (changes reflected without rebuild)
+      - ./agent_app/app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
     depends_on:
       mindsdb:
+        condition: service_started
+      gpt_researcher_mcp:
         condition: service_started
 
 volumes:

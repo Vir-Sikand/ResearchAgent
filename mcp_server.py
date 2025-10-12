@@ -10,7 +10,7 @@ app = FastAPI(title="GPT-Researcher MCP Server")
 
 class ResearchRequest(BaseModel):
     query: str
-    depth: str = "quick"
+    depth: str = "deep"
     max_results: int = 12
 
 class ResearchResponse(BaseModel):

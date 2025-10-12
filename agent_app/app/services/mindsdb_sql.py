@@ -12,7 +12,8 @@ def _conn():
     )
 
 def insert_chunk(text: str, title: str|None, page: int|None, source_uri: str|None):
-    sql = f"INSERT INTO {KB_NAME} (text, title, page, source_uri) VALUES (%s, %s, %s, %s);"
+    # MindsDB requires database.table format
+    sql = f"INSERT INTO mindsdb.{KB_NAME} (text, title, page, source_uri) VALUES (%s, %s, %s, %s);"
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (text, title, page, source_uri))
