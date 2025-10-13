@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  
+  body {
+    @apply bg-gray-900 text-gray-100;
+  }
+}
+
+@layer components {
+  .chat-message {
+    @apply max-w-4xl mx-auto px-4 py-4;
+  }
+  
+  .chat-message.user {
+    @apply bg-gray-800;
+  }
+  
+  .chat-message.assistant {
+    @apply bg-gray-800 border border-gray-700;
+  }
+  
+  .message-content {
+    @apply text-gray-100 leading-relaxed;
+  }
+  
+  .message-content.user {
+    @apply text-white;
+  }
+  
+  .file-upload-area {
+    @apply border-2 border-dashed border-gray-600 rounded-xl p-12 text-center hover:border-gray-500 transition-colors bg-gray-800/50;
+  }
+  
+  .file-upload-area.dragover {
+    @apply border-gray-500 bg-gray-800/70;
+  }
+  
+  .input-area {
+    @apply fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-700;
+  }
+  
+  .input-container {
+    @apply max-w-4xl mx-auto p-4;
+  }
+  
+  .chat-bubble {
+    @apply rounded-2xl px-4 py-3 max-w-[80%] shadow-lg;
+  }
+  
+  .chat-bubble.user {
+    @apply bg-gray-700 text-white ml-auto;
+  }
+  
+  .chat-bubble.assistant {
+    @apply bg-gray-800 text-gray-100 mr-auto border border-gray-700;
+  }
+}
