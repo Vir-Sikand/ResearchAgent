@@ -34,7 +34,9 @@ def search_kb(query: str, top_k: int = 8) -> List[Dict]:
     # Returns: id, chunk_content, metadata columns
     # Must use database.table format
     # Note: Using string formatting because MindsDB semantic search needs direct string
-    sql = f"SELECT * FROM mindsdb.{KB_NAME} WHERE content = '{query}' LIMIT {top_k};"
+    # Escape single quotes to prevent SQL injection
+    escaped_query = query.replace("'", "''")
+    sql = f"SELECT * FROM mindsdb.{KB_NAME} WHERE content = '{escaped_query}' LIMIT {top_k};"
     
     with _conn() as conn:
         with conn.cursor() as cur:

@@ -7,13 +7,14 @@ Routes queries to either KB-only or KB + deep research based on:
 3. Nemotron LLM assessment of whether KB results are sufficient
 """
 import os
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import List, Optional, Literal
 
 from ..services.openai_client import client
 from ..services.kb_service import search_and_rerank, insert_chunk
 from ..services.gpt_researcher_client import conduct_research
+from ..services.document_parser import parse_multiple_documents
 
 router = APIRouter()
 
@@ -328,6 +329,245 @@ async def handle_query(request: QueryRequest):
             title=f"Research: {query[:80]}",
             source_uri="mcp:gpt-researcher"
         ))
+        
+        return QueryResponse(
+            answer=synthesized_answer,
+            sources=all_sources,
+            route_taken="research_then_kb",
+            confidence=confidence,
+            research_conducted=True
+        )
+
+
+@router.post("/query/with-documents", response_model=QueryResponse)
+async def handle_query_with_documents(
+    query: str = Form(...),  # Now required
+    files: List[UploadFile] = File(...),
+    override: Optional[str] = Form(None),
+    depth: str = Form("quick"),
+    max_results: int = Form(12)
+):
+    """
+    Enhanced query endpoint that accepts documents (PDF, DOCX, PNG, JPG).
+    
+    Documents are parsed using NVIDIA VILA VLM for accurate text extraction:
+    - PDF: Each page converted to image and processed with VILA
+    - DOCX: Converted to PDF first, then processed like PDF
+    - PNG/JPG: Direct VILA processing
+    
+    How it works:
+    - KB Search: Uses your query only
+    - Research: Uses your query only
+    - Answer Generation: LLM receives your query + KB/research results + parsed document context
+    
+    Both query and documents are required.
+    """
+    
+    # Parse uploaded documents
+    try:
+        # Read all files
+        file_data = []
+        for upload_file in files:
+            content = await upload_file.read()
+            file_data.append((content, upload_file.filename, upload_file.content_type))
+        
+        # Parse documents with VILA
+        parsed_docs_info = parse_multiple_documents(file_data)
+        document_context = parsed_docs_info['combined_text']
+        
+        # Log parsing results
+        print(f"[DOCS] Parsed {parsed_docs_info['successful_parses']}/{parsed_docs_info['total_documents']} documents")
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse documents: {str(e)}")
+    
+    # For KB search and research: use ONLY the user query
+    search_query = query
+    research_query = query
+    
+    # For answer generation: combine query + KB/research results + document context
+    # This will be built in the answer generation functions
+    
+    # Convert override string to proper type
+    override_value = None
+    if override and override in ["force:kb", "force:research"]:
+        override_value = override
+    
+    # Handle force:kb override
+    if override_value == "force:kb":
+        # Search KB with ONLY the user query
+        kb_results, scores = search_and_rerank(search_query, top_k=8, rerank_top_n=5)
+        
+        if not kb_results:
+            raise HTTPException(status_code=404, detail="No KB results found")
+        
+        # Generate answer using: query + KB results + document context
+        answer_prompt = f"""Query: {query}
+
+Document Context from Uploaded Files:
+{document_context}
+
+Please answer the query using both the KB results provided and the document context above."""
+        
+        answer = generate_answer_from_kb(answer_prompt, kb_results)
+        
+        sources = [
+            Source(
+                text=r.get("text", ""),
+                title=r.get("title"),
+                page=r.get("page"),
+                source_uri=r.get("source_uri"),
+                relevance_score=scores[i] if i < len(scores) else None
+            )
+            for i, r in enumerate(kb_results)
+        ]
+        
+        # Add document info to sources
+        if parsed_docs_info:
+            sources.append(Source(
+                text=document_context[:1000] + "...",
+                title="Uploaded Documents",
+                source_uri=f"upload://{parsed_docs_info['successful_parses']}_documents"
+            ))
+        
+        return QueryResponse(
+            answer=answer,
+            sources=sources,
+            route_taken="kb_only",
+            confidence=sum(scores) / len(scores) if scores else 0.0,
+            research_conducted=False
+        )
+    
+    # Handle force:research override
+    if override_value == "force:research":
+        # Conduct research using ONLY the user query
+        research_result = conduct_research(research_query, depth=depth, max_results=max_results)
+        
+        # Upsert full research report to KB for future reference
+        insert_chunk(
+            text=research_result.report,
+            title=f"Research: {query[:80]}",
+            page=1,
+            source_uri="mcp:gpt-researcher"
+        )
+        
+        # Generate answer using: query + research results + document context
+        answer_prompt = f"""Query: {query}
+
+Document Context from Uploaded Files:
+{document_context}
+
+Please answer the query using both the research findings provided and the document context above."""
+        
+        synthesized_answer = generate_answer_from_research(answer_prompt, research_result.report)
+        
+        sources = [Source(text=research_result.report, source_uri="mcp:gpt-researcher")]
+        
+        # Add document info
+        if parsed_docs_info:
+            sources.append(Source(
+                text=document_context[:1000] + "...",
+                title="Uploaded Documents",
+                source_uri=f"upload://{parsed_docs_info['successful_parses']}_documents"
+            ))
+        
+        return QueryResponse(
+            answer=synthesized_answer,
+            sources=sources,
+            route_taken="research_only",
+            research_conducted=True
+        )
+    
+    # Default: Smart routing
+    # Search KB with ONLY the user query
+    kb_results, scores = search_and_rerank(search_query, top_k=8, rerank_top_n=5)
+    
+    # Assess KB sufficiency using just the query
+    is_sufficient, reasoning, confidence = assess_kb_sufficiency(search_query, kb_results, scores)
+    
+    if is_sufficient and kb_results:
+        # KB is sufficient - generate answer using query + KB results + document context
+        answer_prompt = f"""Query: {query}
+
+Document Context from Uploaded Files:
+{document_context}
+
+Please answer the query using both the KB results provided and the document context above."""
+        
+        answer = generate_answer_from_kb(answer_prompt, kb_results)
+        
+        sources = [
+            Source(
+                text=r.get("text", ""),
+                title=r.get("title"),
+                page=r.get("page"),
+                source_uri=r.get("source_uri"),
+                relevance_score=scores[i] if i < len(scores) else None
+            )
+            for i, r in enumerate(kb_results)
+        ]
+        
+        if parsed_docs_info:
+            sources.append(Source(
+                text=document_context[:1000] + "...",
+                title="Uploaded Documents",
+                source_uri=f"upload://{parsed_docs_info['successful_parses']}_documents"
+            ))
+        
+        return QueryResponse(
+            answer=answer,
+            sources=sources,
+            route_taken="kb_only",
+            confidence=confidence,
+            research_conducted=False
+        )
+    
+    else:
+        # KB insufficient - conduct research using ONLY the user query
+        research_result = conduct_research(research_query, depth=depth, max_results=max_results)
+        
+        # Upsert full research report to KB for future reference
+        insert_chunk(
+            text=research_result.report,
+            title=f"Research: {query[:80]}",
+            page=1,
+            source_uri="mcp:gpt-researcher"
+        )
+        
+        # Generate answer using: query + research results + document context
+        answer_prompt = f"""Query: {query}
+
+Document Context from Uploaded Files:
+{document_context}
+
+Please answer the query using both the research findings and the document context above."""
+        
+        synthesized_answer = generate_answer_from_research(answer_prompt, research_result.report)
+        
+        # Combine KB results with research
+        all_sources = [
+            Source(
+                text=r.get("text", ""),
+                title=r.get("title"),
+                page=r.get("page"),
+                source_uri=r.get("source_uri"),
+                relevance_score=scores[i] if i < len(scores) else None
+            )
+            for i, r in enumerate(kb_results)
+        ]
+        
+        all_sources.append(Source(
+            text=research_result.report,
+            title=f"Research: {query[:80] if query else 'Document Analysis'}",
+            source_uri="mcp:gpt-researcher"
+        ))
+        
+        if parsed_docs_info:
+            all_sources.append(Source(
+                text=document_context[:1000] + "...",
+                title="Uploaded Documents",
+                source_uri=f"upload://{parsed_docs_info['successful_parses']}_documents"
+            ))
         
         return QueryResponse(
             answer=synthesized_answer,
